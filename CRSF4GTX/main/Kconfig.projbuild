@@ -1,0 +1,22 @@
+menu "CRSF4GTX Configuration"
+
+    config WIFI_SSID
+        string "WiFi SSID"
+        default "myssid"
+
+    config WIFI_PASSWORD
+        string "WiFi Password"
+        default "mypassword"
+
+    config WIFI_MAXIMUM_RETRY
+        int "WiFi Maximum Retry Num"
+        default 5
+
+    config CRSF_SERVER_HOST
+        string "Server Host Address"
+        default ""
+
+    config CRSF_SERVER_PORT
+        int "Server Port"
+        default 3000
+endmenu
