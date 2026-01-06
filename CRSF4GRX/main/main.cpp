@@ -34,7 +34,7 @@ void uart1_init(void) {
 
 void uart0_init(void) {
     uart_config_t uart_config = {};
-    uart_config.baud_rate = 115200;
+    uart_config.baud_rate = 420000;
     uart_config.data_bits = UART_DATA_8_BITS;
     uart_config.parity    = UART_PARITY_DISABLE;
     uart_config.stop_bits = UART_STOP_BITS_1;
