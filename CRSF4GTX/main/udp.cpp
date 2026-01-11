@@ -107,6 +107,7 @@ void crsf_udp_recv_task(void* pvParameters) {
                 sock = -1;
             }
         } else if (len > 0) {
+            crsf.ProcessPacket((uint8_t*) rx_buffer, len);
             crsf.txFunc((uint8_t*) rx_buffer, len);
             ESP_LOG_BUFFER_HEX(TAG, rx_buffer, len);
         }

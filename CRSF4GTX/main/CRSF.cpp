@@ -257,14 +257,15 @@ void CRSF_TxModule::SendParamChunk(uint8_t paramIdx, uint8_t chunkIdx) {
 
 // 路由器
 void CRSF_TxModule::ProcessPacket(uint8_t* buf, uint8_t len) {
+    const char* TAG = "CRSF";
     if (len < 4) return;
     if (len >= sizeof(time_packet_t)) {
         // 遍历 buffer
         for (int i = 0; i <= len - (int)sizeof(time_packet_t); i++) {
-            // 1. 先检查 Magic，避免无谓的 memcpy
-            if (buf[i] == 0xFA) { 
+            // 1. 先检查 Magic
+            if (buf[i] == TIME_SYNC_MAGIC) { 
                 // 2. 再次检查 Type
-                if (buf[i+1] == 0x02) { // PACKET_TYPE_PONG
+                if (buf[i+1] == PACKET_TYPE_PONG) { // PACKET_TYPE_PONG
                     time_packet_t temp_pkt;
                     memcpy(&temp_pkt, &buf[i], sizeof(time_packet_t));
                     handle_incoming_pong(&temp_pkt);
