@@ -1,6 +1,8 @@
 #include "CRSF.hpp"
 #include <cstdint>
 
+volatile uint64_t current_latency_ms;
+
 // ---------------- CRC Implementation ----------------
 static const uint8_t crc8tab[256] = {
     0x00, 0xD5, 0x7F, 0xAA, 0xFE, 0x2B, 0x81, 0x54, 0x29, 0xFC, 0x56, 0x83, 0xD7, 0x02, 0xA8, 0x7D,
@@ -256,6 +258,21 @@ void CRSF_TxModule::SendParamChunk(uint8_t paramIdx, uint8_t chunkIdx) {
 // 路由器
 void CRSF_TxModule::ProcessPacket(uint8_t* buf, uint8_t len) {
     if (len < 4) return;
+    if (len >= sizeof(time_packet_t)) {
+        // 遍历 buffer
+        for (int i = 0; i <= len - (int)sizeof(time_packet_t); i++) {
+            // 1. 先检查 Magic，避免无谓的 memcpy
+            if (buf[i] == 0xFA) { 
+                // 2. 再次检查 Type
+                if (buf[i+1] == 0x02) { // PACKET_TYPE_PONG
+                    time_packet_t temp_pkt;
+                    memcpy(&temp_pkt, &buf[i], sizeof(time_packet_t));
+                    handle_incoming_pong(&temp_pkt);
+                    i += (sizeof(time_packet_t) - 1);
+                }
+            }
+        }
+    }
     
     uint8_t type = buf[2];
 
@@ -319,4 +336,36 @@ void CRSF_TxModule::ParseChannels(const uint8_t* payload)
         bitbuf >>= 11;
         bitcount -= 11;
     }
+}
+
+// Get time in microseconds
+int64_t get_time() {
+    return esp_timer_get_time();
+}
+
+// Received a packet from LTE that starts with 0xFA
+void CRSF_TxModule::handle_incoming_pong(time_packet_t* pkt) {
+    if (pkt->magic == TIME_SYNC_MAGIC && pkt->type == PACKET_TYPE_PONG) {
+        int64_t now = esp_timer_get_time();
+        int64_t rtt = now - pkt->timestamp; 
+        
+        // 过滤异常数据：如果时间差是负数或者大得离谱，说明数据错乱或者重启了
+        if (rtt > 0 && rtt < 5000000) {
+            uint32_t delay_ms = (uint32_t)(rtt / 1000); 
+            current_latency_ms = delay_ms;
+            // printf("Ping Success! RTT: %u ms\n", delay_ms);
+        }
+    }
+}
+
+void CRSF_TxModule::SendPing(void) {
+    current_latency_ms = 0;
+
+    time_packet_t pkt;
+    pkt.magic = TIME_SYNC_MAGIC;
+    pkt.type = PACKET_TYPE_PING;
+    pkt.timestamp = get_time();
+    
+    // Send to LTE/UDP bridge (UART_NUM_1 in your code)
+    crsf_udp_send((const uint8_t*)&pkt, sizeof(pkt));
 }

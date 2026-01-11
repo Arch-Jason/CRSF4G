@@ -8,6 +8,13 @@
 #include <math.h>
 #include <string>
 #include "udp.hpp"
+#include "esp_timer.h"
+
+// ---------------- Helper Macros ----------------
+#define PACKED __attribute__((packed))
+// ARM Cortex-M 内置指令，快速大小端转换
+#define TO_BE32(x) __builtin_bswap32(x) 
+#define TO_BE16(x) __builtin_bswap16(x)
 
 // ---------------- Configuration ----------------
 #define MAX_PARAM_COUNT 10      // 最大支持参数数量
@@ -28,6 +35,21 @@
 #define CRSF_TYPE_PARAM_WRITE   0x2D
 
 #define CRSF_FRAMETYPE_RC_CHANNELS_PACKED 0x16
+#define CRSF_FRAMETYPE_LINK_STATISTICS 0x14
+
+// Custom protocol definition
+#define TIME_SYNC_MAGIC 0xFA 
+#define PACKET_TYPE_PING 0x01
+#define PACKET_TYPE_PONG 0x02
+
+typedef struct PACKED {
+    uint8_t magic;      // 0xFA
+    uint8_t type;       // 0x01 or 0x02
+    int64_t timestamp;  // Microseconds
+} time_packet_t;
+
+// CRSF Link Statistics
+extern volatile uint64_t current_latency_ms;
 
 // Parameter Types
 enum ParamType : uint8_t {
@@ -38,12 +60,6 @@ enum ParamType : uint8_t {
     PTV_INFO            = 12,
     PTV_COMMAND         = 13
 };
-
-// ---------------- Helper Macros ----------------
-#define PACKED __attribute__((packed))
-// ARM Cortex-M 内置指令，快速大小端转换
-#define TO_BE32(x) __builtin_bswap32(x) 
-#define TO_BE16(x) __builtin_bswap16(x)
 
 // ---------------- Abstract Base Class ----------------
 class CRSF_Param {
@@ -157,19 +173,21 @@ private:
     uint8_t paramCount;
     int16_t channels[16];
     
-    // Hardware abstractions
-    void (*txFunc)(uint8_t*, uint16_t);
-
     // Helpers
-    uint8_t CalcCRC8(const uint8_t* data, uint8_t len);
     void SendRawFrame(uint8_t type, uint8_t* payload, uint8_t len);
     void SendDeviceInfo();
     void SendParamChunk(uint8_t paramIdx, uint8_t chunkIdx);
+    void handle_incoming_pong(time_packet_t* data);
 
 public:
+    // Hardware abstractions
+    void (*txFunc)(uint8_t*, uint16_t);
+
     CRSF_TxModule(void (*_txFunc)(uint8_t*, uint16_t));
     void AddParam(CRSF_Param* param);
     CRSF_Param* GetParam(const char* name);
     void ProcessPacket(uint8_t* buf, uint8_t len);
     void ParseChannels(const uint8_t *payload);
+    void SendPing(void);
+    uint8_t CalcCRC8(const uint8_t* data, uint8_t len);
 };

@@ -5,6 +5,16 @@ static const char* TAG = "UDP";
 struct sockaddr_in dest_addr;
 int sock = -1;
 
+#define UDP_TX_QUEUE_LEN 20
+#define UDP_TX_MAX_PAYLOAD 64 
+
+typedef struct {
+    uint8_t data[UDP_TX_MAX_PAYLOAD];
+    uint16_t len;
+} udp_tx_item_t;
+
+static QueueHandle_t udp_tx_queue = NULL;
+
 int create_socket(void) {
     if (sock != -1) {
         close(sock);
@@ -44,20 +54,20 @@ int create_socket(void) {
 }
 
 void crsf_udp_send(const uint8_t* buf, const uint16_t len) {
-    if (sock < 0) {
-        ESP_LOGE(TAG, "Socket not ready");
+    if (len > UDP_TX_MAX_PAYLOAD) {
+        ESP_LOGW(TAG, "Packet too large for queue");
         return;
     }
+    
+    if (udp_tx_queue == NULL) return;
 
-    int err = sendto(sock, buf, len, 0, (struct sockaddr*) &dest_addr, sizeof(dest_addr));
-    if (err < 0) {
-        ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-        if (errno == ENOTCONN || errno == EBADF) {
-            close(sock);
-            sock = -1;
-        }
-    } else {
-        // ESP_LOGI(TAG, "Message sent %d bytes", len);
+    udp_tx_item_t item;
+    memcpy(item.data, buf, len);
+    item.len = len;
+
+    // Push to queue, do not wait if full (0 ticks) to prevent blocking main loop
+    if (xQueueSend(udp_tx_queue, &item, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "UDP TX queue full, dropping packet");
     }
 }
 
@@ -97,13 +107,43 @@ void crsf_udp_recv_task(void* pvParameters) {
                 sock = -1;
             }
         } else if (len > 0) {
-            crsf.ProcessPacket((uint8_t*) rx_buffer, len);
+            crsf.txFunc((uint8_t*) rx_buffer, len);
             ESP_LOG_BUFFER_HEX(TAG, rx_buffer, len);
         }
     }
     vTaskDelete(NULL);
 }
 
+void crsf_udp_send_task(void* pvParameters) {
+    udp_tx_item_t item;
+
+    while (1) {
+        // Block indefinitely until item received
+        if (xQueueReceive(udp_tx_queue, &item, portMAX_DELAY) == pdTRUE) {
+            
+            // Only send if socket is valid
+            if (sock >= 0) {
+                int err = sendto(sock, item.data, item.len, 0, (struct sockaddr*) &dest_addr, sizeof(dest_addr));
+                
+                if (err < 0) {
+                    ESP_LOGE(TAG, "sendto failed: errno %d", errno);
+                    if (errno == ENOTCONN || errno == EBADF) {
+                        close(sock);
+                        sock = -1;
+                    }
+                }
+            }
+        }
+    }
+    vTaskDelete(NULL);
+}
+
 void crsf_udp_init(void) {
+    udp_tx_queue = xQueueCreate(UDP_TX_QUEUE_LEN, sizeof(udp_tx_item_t));
+    if (udp_tx_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create TX queue");
+        return;
+    }
     xTaskCreate(crsf_udp_recv_task, "udp_recv", 4096, NULL, 5, NULL);
+    xTaskCreate(crsf_udp_send_task, "udp_send", 4096, NULL, 5, NULL);
 }

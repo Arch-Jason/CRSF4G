@@ -9,6 +9,7 @@ extern "C" {
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "esp_log.h"
+#include "freertos/queue.h"
 }
 
 #define UDP_RX_BUF_SIZE 256

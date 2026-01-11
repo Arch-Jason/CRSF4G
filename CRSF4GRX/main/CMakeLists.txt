@@ -4,5 +4,6 @@ idf_component_register(
     PRIV_REQUIRES
         spi_flash
         driver
+        esp_timer
     INCLUDE_DIRS ""
 )
