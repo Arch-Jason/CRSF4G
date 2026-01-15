@@ -13,8 +13,8 @@
 #define LTE_RX_PIN GPIO_NUM_0
 #define LTE_TX_PIN GPIO_NUM_1
 
-#define CRSF_TX UART_PIN_NO_CHANGE
-#define CRSF_RX UART_PIN_NO_CHANGE
+#define CRSF_TX GPIO_NUM_2
+#define CRSF_RX GPIO_NUM_3
 
 #define HEARTBEAT_INTERVAL_MS 5000
 
@@ -95,6 +95,8 @@ void uart0_init(void) {
     ESP_ERROR_CHECK(uart_param_config(UART_NUM_0, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM_0, CRSF_TX, CRSF_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, RX_BUF_SIZE * 2, RX_BUF_SIZE * 2, 0, NULL, 0));
+    gpio_set_pull_mode(CRSF_RX, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(CRSF_TX, GPIO_PULLUP_ONLY);
 }
 
 void LTE_init(void) {
@@ -124,6 +126,10 @@ void task_forward_lte_to_crsf(void* pvParameters) {
             case UART_DATA:
                 uart_read_bytes(UART_NUM_1, buf, event.size, portMAX_DELAY);
                 if (event.size > 0) {
+                    for (uint16_t i = 0; i < event.size; i++) {
+                        if (buf[i] == 0xEE)
+                            buf[i] = 0xC8;
+                    }
                     // 1. 先尝试在数据流中搜索 Ping 包并回复
                     process_ping_and_reply(buf, event.size);
 
