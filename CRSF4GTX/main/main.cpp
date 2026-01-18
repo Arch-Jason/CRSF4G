@@ -15,12 +15,12 @@ extern "C" {
 #include <string>
 }
 
-static QueueHandle_t uart0_queue;
+static QueueHandle_t uart_queue;
 static QueueHandle_t tx_queue;
 
 #define RX_BUF_SIZE 1024
 #define TASK_STACK_SIZE 4096
-#define CRSF_UART_PIN GPIO_NUM_4
+#define CRSF_UART_PIN GPIO_NUM_2
 
 struct TxPacket {
     uint8_t buf[256];
@@ -47,7 +47,7 @@ void uart_init(void) {
     uart_config.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
     uart_config.source_clk = UART_SCLK_DEFAULT;
 
-    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_1, RX_BUF_SIZE * 2, RX_BUF_SIZE * 2, 20, &uart0_queue, 0));
+    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_1, RX_BUF_SIZE * 2, RX_BUF_SIZE * 2, 20, &uart_queue, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_NUM_1, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM_1,
                  CRSF_UART_PIN, // TXD
@@ -69,7 +69,7 @@ void uart_event_task(void* pvParameters) {
         bool did_work = false;
 
         // 1. 处理 RX 事件
-        if (xQueueReceive(uart0_queue, (void*) &event, 2)) {
+        if (xQueueReceive(uart_queue, (void*) &event, 2)) {
             did_work = true;
             switch (event.type) {
             case UART_DATA:
@@ -79,7 +79,7 @@ void uart_event_task(void* pvParameters) {
             case UART_FIFO_OVF:
             case UART_BUFFER_FULL:
                 uart_flush_input(UART_NUM_1);
-                xQueueReset(uart0_queue);
+                xQueueReset(uart_queue);
                 break;
             default:
                 break;
@@ -105,15 +105,14 @@ void uart_event_task(void* pvParameters) {
 }
 
 static CRSF_ParamFolder crsf_add_basic_param() {
-    static uint8_t rootChildren[] = {1};
-    static CRSF_ParamFolder pRoot(0, 0, "ROOT", rootChildren, 1);
+    static uint8_t rootChildren[] = {1, 2, 3, 4, 5, 6};
+    static CRSF_ParamFolder pRoot(0, "ROOT", rootChildren, 1);
     crsf.AddParam(&pRoot);
-    static CRSF_ParamInfo info(0, pRoot.id, "CRSF 4G v1.0", "by Arch-Jason");
+    static CRSF_ParamInfo info(pRoot.id, "CRSF 4G v1.0", "by Arch-Jason");
     crsf.AddParam(&info);
-    static CRSF_ParamInfo UDPAddr(0, pRoot.id, "UDP Address", CONFIG_CRSF_SERVER_HOST);
+    static CRSF_ParamInfo UDPAddr(pRoot.id, "UDP Address", CONFIG_CRSF_SERVER_HOST);
     crsf.AddParam(&UDPAddr);
-    static CRSF_ParamFloat UDPPort(0,
-                                   pRoot.id,
+    static CRSF_ParamFloat UDPPort(pRoot.id,
                                    "UDP Port",
                                    CONFIG_CRSF_SERVER_PORT,
                                    CONFIG_CRSF_SERVER_PORT,
@@ -122,11 +121,11 @@ static CRSF_ParamFolder crsf_add_basic_param() {
                                    1,
                                    "");
     crsf.AddParam(&UDPPort);
-    static CRSF_ParamInfo wifi_info(0, pRoot.id, "Is WiFi Connected", "Disconnected");
+    static CRSF_ParamInfo wifi_info(pRoot.id, "Is WiFi Connected", "Disconnected");
     crsf.AddParam(&wifi_info);
-    static CRSF_ParamInfo server_info(0, pRoot.id, "Is Server Connected", "Disconnected");
+    static CRSF_ParamInfo server_info(pRoot.id, "Is Server Connected", "Disconnected");
     crsf.AddParam(&server_info);
-    static CRSF_ParamInfo latency_ms(0, pRoot.id, "Latency (ms)", "NaN");
+    static CRSF_ParamInfo latency_ms(pRoot.id, "Latency (ms)", "NaN");
     crsf.AddParam(&latency_ms);
     return pRoot;
 }

@@ -69,8 +69,8 @@ public:
     const char* name;
     ParamType type;
 
-    CRSF_Param(uint8_t _id, uint8_t _parentId, const char* _name, ParamType _type)
-        : id(_id), parentId(_parentId), name(_name), type(_type) {}
+    CRSF_Param(uint8_t _parentId, const char* _name, ParamType _type)
+        : parentId(_parentId), name(_name), type(_type) {}
 
     virtual ~CRSF_Param() {}
 
@@ -93,8 +93,8 @@ public:
     const uint8_t* childrenIDs; 
     uint8_t childrenCount;
 
-    CRSF_ParamFolder(uint8_t _id, uint8_t _parentId, const char* _name, const uint8_t* _children, uint8_t _count)
-        : CRSF_Param(_id, _parentId, _name, PTV_FOLDER), childrenIDs(_children), childrenCount(_count) {}
+    CRSF_ParamFolder(uint8_t _parentId, const char* _name, const uint8_t* _children, uint8_t _count)
+        : CRSF_Param(_parentId, _name, PTV_FOLDER), childrenIDs(_children), childrenCount(_count) {}
 
     uint16_t Serialize(uint8_t* buf) override;
 };
@@ -104,8 +104,8 @@ class CRSF_ParamInfo : public CRSF_Param {
 public:
     const char* valueStr;
 
-    CRSF_ParamInfo(uint8_t _id, uint8_t _parentId, const char* _name, const char* _val)
-        : CRSF_Param(_id, _parentId, _name, PTV_INFO), valueStr(_val) {}
+    CRSF_ParamInfo(uint8_t _parentId, const char* _name, const char* _val)
+        : CRSF_Param(_parentId, _name, PTV_INFO), valueStr(_val) {}
 
     uint16_t Serialize(uint8_t* buf) override;
 };
@@ -121,9 +121,9 @@ public:
     int32_t step;
     const char* unit;
 
-    CRSF_ParamFloat(uint8_t _id, uint8_t _parentId, const char* _name, 
+    CRSF_ParamFloat(uint8_t _parentId, const char* _name, 
                     int32_t _val, int32_t _min, int32_t _max, uint8_t _decimal_point, int32_t _step, const char* _unit)
-        : CRSF_Param(_id, _parentId, _name, PTV_FLOAT), 
+        : CRSF_Param(_parentId, _name, PTV_FLOAT), 
           value(_val), min(_min), max(_max), def(_val), decimal_point(_decimal_point), step(_step), unit(_unit) {}
 
     uint16_t Serialize(uint8_t* buf) override;
@@ -138,9 +138,9 @@ public:
     const char* options; // Semicolon separated: "OptA;OptB;OptC"
     const char* unit;
 
-    CRSF_ParamSelection(uint8_t _id, uint8_t _parentId, const char* _name, 
+    CRSF_ParamSelection(uint8_t _parentId, const char* _name, 
                         uint8_t _val, const char* _options, const char* _unit)
-        : CRSF_Param(_id, _parentId, _name, PTV_TEXT_SELECTION), 
+        : CRSF_Param(_parentId, _name, PTV_TEXT_SELECTION), 
           value(_val), options(_options), unit(_unit) {
               std::string options_str(_options);
               max_options = std::count(options_str.begin(), options_str.end(), ';');
@@ -156,9 +156,9 @@ public:
     char* value;
     uint8_t string_max_len;
 
-    CRSF_ParamString(uint8_t _id, uint8_t _parentId, const char* _name, 
+    CRSF_ParamString(uint8_t _parentId, const char* _name, 
                         const char* _val, uint8_t _string_max_len)
-        : CRSF_Param(_id, _parentId, _name, PTV_STRING), 
+        : CRSF_Param(_parentId, _name, PTV_STRING), 
           value((char*) _val), string_max_len(_string_max_len) {
           }
 

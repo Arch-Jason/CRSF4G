@@ -182,22 +182,26 @@ void CRSF_TxModule::SendRawFrame(uint8_t type, uint8_t* payload, uint8_t len) {
 
 // 发送设备信息 (0x29)
 void CRSF_TxModule::SendDeviceInfo() {
-    uint8_t buf[60];
+    uint8_t buf[80];
     uint8_t pos = 0;
-    
-    buf[pos++] = CRSF_ADDRESS_RADIO; // Destination: Radio
-    buf[pos++] = CRSF_ADDRESS_MODULE; // Origin: Me
+
+    buf[pos++] = CRSF_ADDRESS_RADIO;
+    buf[pos++] = CRSF_ADDRESS_MODULE;
 
     const char* name = "CRSF4G TX";
-    int nameLen = strlen(name) + 1;
-    memcpy(&buf[pos], name, nameLen); pos += nameLen;
+    strcpy((char*)&buf[pos], name);
+    pos += strlen(name) + 1;
 
-    uint32_t sn = TO_BE32(0); memcpy(&buf[pos], &sn, 4); pos += 4;
-    uint32_t hw = TO_BE32(0); memcpy(&buf[pos], &hw, 4); pos += 4;
-    uint32_t fw = TO_BE32(0); memcpy(&buf[pos], &fw, 4); pos += 4;
-    
-    buf[pos++] = paramCount; // Total Params
-    buf[pos++] = 0;          // Param Version
+    uint32_t sn = TO_BE32(0x43525346); // "CRSF"
+    uint32_t hw = TO_BE32(1);
+    uint32_t fw = TO_BE32(0x00010000); // v1.0.0
+
+    memcpy(&buf[pos], &sn, 4); pos += 4;
+    memcpy(&buf[pos], &hw, 4); pos += 4;
+    memcpy(&buf[pos], &fw, 4); pos += 4;
+
+    buf[pos++] = paramCount;
+    buf[pos++] = 1; // Param Version **必须非 0**
 
     SendRawFrame(CRSF_TYPE_DEVICE_INFO, buf, pos);
 }
@@ -216,7 +220,7 @@ void CRSF_TxModule::SendParamChunk(uint8_t paramIdx, uint8_t chunkIdx) {
     if (!p) return; // Param not found
 
     // 2. 将整个参数定义序列化到一个大Buffer中 (栈内存需足够，或者用静态buffer)
-    uint8_t fullDef[128]; 
+    uint8_t fullDef[256]; 
     uint16_t totalLen = p->Serialize(fullDef);
 
     // 3. 计算切片位置
@@ -257,67 +261,126 @@ void CRSF_TxModule::SendParamChunk(uint8_t paramIdx, uint8_t chunkIdx) {
 
 // 路由器
 void CRSF_TxModule::ProcessPacket(uint8_t* buf, uint8_t len) {
-    const char* TAG = "CRSF";
-    if (len < 4) return;
-    if (len >= sizeof(time_packet_t)) {
-        // 遍历 buffer
-        for (int i = 0; i <= len - (int)sizeof(time_packet_t); i++) {
-            // 1. 先检查 Magic
-            if (buf[i] == TIME_SYNC_MAGIC) { 
-                // 2. 再次检查 Type
-                if (buf[i+1] == PACKET_TYPE_PONG) { // PACKET_TYPE_PONG
-                    time_packet_t temp_pkt;
-                    memcpy(&temp_pkt, &buf[i], sizeof(time_packet_t));
-                    handle_incoming_pong(&temp_pkt);
-                    i += (sizeof(time_packet_t) - 1);
-                }
+    uint8_t offset = 0;
+
+    // 循环处理 Buffer 直到数据不足以构成一个包
+    while (offset < len) {
+        uint8_t* ptr = &buf[offset];      // 当前包的起始指针
+        int remaining = len - offset;     // 剩余数据长度
+
+        // ==========================================
+        // 1. 检查是否为自定义时间同步包 (Time Packet)
+        // ==========================================
+        if (remaining >= (int)sizeof(time_packet_t)) {
+            // 检查 Magic 和 Type
+            if (ptr[0] == TIME_SYNC_MAGIC && ptr[1] == PACKET_TYPE_PONG) {
+                time_packet_t temp_pkt;
+                memcpy(&temp_pkt, ptr, sizeof(time_packet_t));
+                handle_incoming_pong(&temp_pkt);
+
+                // 处理完毕，移动游标
+                offset += sizeof(time_packet_t);
+                continue; 
             }
         }
-    }
-    
-    uint8_t type = buf[2];
 
-    switch (type) {
-        case CRSF_TYPE_PING: // 0x28
-            // Check destination (Broadcast 0x00 or Me 0xEE)
-            if (buf[3] == 0x00 || buf[3] == CRSF_ADDRESS_MODULE) {
-                SendDeviceInfo();
-            }
-            break;
+        // ==========================================
+        // 2. 检查是否为 CRSF 包
+        // CRSF 格式: [Addr] [Len] [Type] [Payload...] [CRC]
+        // ==========================================
+        
+        // 至少需要 2 字节才能知道包的长度 (Addr + Len)
+        if (remaining < 2) {
+            break; // 数据不全，结束本次处理
+        }
 
-        case CRSF_TYPE_PARAM_READ: // 0x2C
-            // Payload: [Dest][Orig][ParamIdx][ChunkIdx]
-            if (buf[3] == CRSF_ADDRESS_MODULE) { // Is it for me?
-                uint8_t pIdx = buf[5];
-                uint8_t cIdx = buf[6];
-                SendParamChunk(pIdx, cIdx);
-            }
-            break;
-            
-        case CRSF_TYPE_PARAM_WRITE: // 0x2D
-            // Payload: [Dest][Orig][ParamIdx][Value...]
-            if (buf[3] == CRSF_ADDRESS_MODULE) {
-                uint8_t pIdx = buf[5];
-                CRSF_Param* p = nullptr;
-                for(int i=0; i<paramCount; i++) {
-                    if (params[i]->id == pIdx) {
-                        p = params[i];
-                        break;
+        uint8_t body_len = ptr[1]; // CRSF Length 字节 (包含 Type, Payload, CRC)
+        
+        // 简单的合法性检查：CRSF 包体通常在 2 到 62 字节之间
+        // 如果 body_len 太大或太小，说明可能不是 CRSF 包头，或者是噪声
+        if (body_len < 2 || body_len > 62) {
+            // 无法识别的数据，跳过 1 字节尝试重新寻找头
+            offset++;
+            continue;
+        }
+
+        uint8_t full_packet_len = body_len + 2; // [Addr] + [Len] + [Body]
+
+        // 检查是否已接收到完整的 CRSF 包
+        if (remaining < full_packet_len) {
+            // 发现了包头，但数据还没收全。
+            // 这里为了安全直接退出循环
+            break; 
+        }
+
+        // --- 开始处理完整的 CRSF 包 ---
+        
+        uint8_t type = ptr[2]; // Type 位于第 3 字节 [Addr, Len, Type]
+        bool is_processed_locally = false;
+
+        switch (type) {
+            case CRSF_TYPE_PING: // 0x28
+                // Payload Starts at ptr[3]
+                if (ptr[3] == 0x00 || ptr[3] == CRSF_ADDRESS_MODULE) {
+                    SendDeviceInfo();
+                }
+                is_processed_locally = true;
+                break;
+
+            case CRSF_TYPE_PARAM_READ: // 0x2C
+                // Payload: [Dest][Orig][ParamIdx][ChunkIdx]
+                if (ptr[3] == CRSF_ADDRESS_MODULE) {
+                    uint8_t pIdx = ptr[5];
+                    uint8_t cIdx = ptr[6];
+                    SendParamChunk(pIdx, cIdx);
+                }
+                is_processed_locally = true;
+                break;
+                
+            case CRSF_TYPE_PARAM_WRITE: // 0x2D
+                // Payload: [Dest][Orig][ParamIdx][Value...]
+                if (ptr[3] == CRSF_ADDRESS_MODULE) {
+                    uint8_t pIdx = ptr[5];
+                    CRSF_Param* p = nullptr;
+                    for(int k=0; k<paramCount; k++) {
+                        if (params[k]->id == pIdx) {
+                            p = params[k];
+                            break;
+                        }
+                    }
+                    if (p) {
+                        // Value starts at ptr[6]
+                        // 注意计算剩余长度：
+                        // 原代码是 len - 6 - 1，这里要基于当前包长度 full_packet_len 计算
+                        // Payload data len = full_packet_len - (Addr+Len+Type+Dest+Orig+Idx) - CRC
+                        // Addr(1)+Len(1)+Type(1)+Dest(1)+Orig(1)+Idx(1) = 6 bytes header before value
+                        // CRC = 1 byte
+                        // 所以数据长度 = full_packet_len - 6 - 1
+                        int value_len = full_packet_len - 7;
+                        
+                        if (value_len > 0 && p->UpdateValue(&ptr[6], value_len)) {
+                            SendParamChunk(pIdx, 0);
+                        }
                     }
                 }
-                if (p) {
-                    // Value starts at buf[6]
-                    if (p->UpdateValue(&buf[6], len - 6 - 1)) { // -1 for CRC
-                        // 写入成功后，通常需要回传一次 0x2B 确认（特别是对于 Command 类型），或简单回传值
-                        // 为了简单，这里回传 Chunk 0 刷新界面
-                        SendParamChunk(pIdx, 0);
-                    }
-                }
-            }
-            break;
+                is_processed_locally = true;
+                break;
 
-        default:
-            crsf_udp_send(buf, len);
+            default:
+                // 如果是其他类型的包，或者不是发给我们的
+                // 仅转发当前这个包，而不是剩余所有 buffer
+                // 保持 is_processed_locally = false
+                break;
+        }
+
+        if (!is_processed_locally) {
+            // 路由器模式：转发未被拦截的包
+            // 注意：这里只发送当前解析出的这个包 (ptr, full_packet_len)
+            crsf_udp_send(ptr, full_packet_len);
+        }
+
+        // 处理完毕，移动游标到下一个包的起始位置
+        offset += full_packet_len;
     }
 }
 
